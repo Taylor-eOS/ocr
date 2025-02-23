@@ -1,62 +1,40 @@
-import fitz
+import fitz  # PyMuPDF
+from PIL import Image, ImageEnhance
 import pytesseract
-from PIL import Image, ImageOps, ImageFilter
-import tempfile
+import logging
 
-#sudo apt install tesseract-ocr
-#sudo apt install tesseract-ocr-deu
-
-# Set Tesseract path (Linux)
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def preprocess_image(img):
-    """Improve image for OCR"""
-    img = img.convert("L")  # Grayscale
-    img = ImageOps.autocontrast(img)  # Enhance contrast
-    img = img.filter(ImageFilter.SHARPEN)  # Sharpen
-    return img
+    try:
+        img = img.convert("L")
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+        return img
+    except Exception as e:
+        logger.error(f"Preprocessing failed: {e}")
+        return img
 
-def extract_text_from_pdf_images(pdf_path, output_txt="output.txt"):
-    text = []
-    with tempfile.TemporaryDirectory() as temp_dir:
-        doc = fitz.open(pdf_path)
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            images = page.get_images()
-            if images:
-                for img_index, img in enumerate(images):
-                    xref = img[0]
-                    base_image = doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    image_ext = base_image["ext"]
-                    image_filename = f"{temp_dir}/page{page_num + 1}-img{img_index + 1}.{image_ext}"
-                    
-                    with open(image_filename, "wb") as img_file:
-                        img_file.write(image_bytes)
-                    
-                    img = Image.open(image_filename)
-                    img = preprocess_image(img)  # Preprocess
-                    
-                    # Try German first, then Fraktur if needed
-                    try:
-                        ocr_text = pytesseract.image_to_string(
-                            img, 
-                            lang='deu',
-                            config='--psm 6 --oem 3'
-                        )
-                    except:
-                        ocr_text = pytesseract.image_to_string(
-                            img, 
-                            lang='deu-frak',
-                            config='--psm 6 --oem 3'
-                        )
-                    
-                    text.append(ocr_text)
+def pdf_to_text(input_pdf, output_txt):
+    try:
+        full_text = []
         
-        full_text = "\n".join(text)
-        with open(output_txt, "w", encoding="utf-8") as f:
-            f.write(full_text)
-        print(f"Processed text saved to {output_txt}")
+        with fitz.open(input_pdf) as doc:
+            for page_num, page in enumerate(doc):
+                pix = page.get_pixmap(dpi=300)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                processed_img = preprocess_image(img)
+                page_text = pytesseract.image_to_string(processed_img, lang="eng")
+                full_text.append(f"Page {page_num+1}:\n{page_text}\n")
+                logger.info(f"Processed page {page_num+1}")
+        with open(output_txt, "w") as f:
+            f.write("\n".join(full_text))
+        logger.info(f"Successfully saved OCR results to {output_txt}")
+    except Exception as e:
+        logger.error(f"Processing failed: {e}")
+        raise
 
 if __name__ == "__main__":
-    extract_text_from_pdf_images("input.pdf", "output.txt")
+    pdf_to_text("input.pdf", "output.txt")
+
