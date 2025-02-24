@@ -3,11 +3,9 @@ from PIL import Image, ImageEnhance
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import logging
 
-#Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#Enhance image for better OCR results"""
 def preprocess_image(img):
     try:
         img = img.convert("L")

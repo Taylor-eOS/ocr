@@ -1,8 +1,11 @@
+import os
 import cv2
 import numpy as np
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from tesseract_ocr import preprocess_image
+
+debug = True
 
 def detect_line_gaps(image, min_gap=5, white_ratio=0.95):
     if isinstance(image, str):
@@ -29,25 +32,38 @@ def detect_line_gaps(image, min_gap=5, white_ratio=0.95):
         gaps.append((start, len(projection)))
     return [(s + e) // 2 for s, e in gaps]
 
-def image_to_text(image_input):
+def image_to_text(image_input, debug_dir="."):
     if isinstance(image_input, str):
         image = Image.open(image_input)
     else:
         image = image_input
     cv_image = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
     gaps = detect_line_gaps(cv_image)
+    if debug:
+        print("Detected gaps:", gaps)
+        print("Current working directory:", os.getcwd())
     width, height = image.size
     boundaries = [0] + gaps + [height]
+    if debug: print("Computed line boundaries:", boundaries)
     processor = TrOCRProcessor.from_pretrained('microsoft/trocr-base-printed')
     model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-base-printed')
     full_text = []
+    margin = 1
     for i in range(len(boundaries) - 1):
-        line_img = image.crop((0, boundaries[i], width, boundaries[i+1]))
+        top = max(0, boundaries[i] - margin)
+        bottom = min(height, boundaries[i+1] + margin)
+        if debug: print(f"Processing line {i+1}: top={top}, bottom={bottom}")
+        line_img = image.crop((0, top, width, bottom))
+        if debug:
+            debug_filename = os.path.join(debug_dir, f"debug_line_{i+1}.png")
+            line_img.save(debug_filename)
+            print(f"Saved debug image: {debug_filename}")
         line_img = preprocess_image(line_img)
         pixel_values = processor(images=line_img, return_tensors="pt").pixel_values
         generated_ids = model.generate(pixel_values)
         line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        full_text.append(line_text)
+        if debug: print(f"OCR for line {i+1}: {line_text}")
+        full_text.append(line_text.lower())
     return "\n".join(full_text)
 
 if __name__ == "__main__":
